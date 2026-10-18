@@ -1,0 +1,45 @@
+# Same pipeline as the Jenkinsfile, runnable on GitHub-hosted runners.
+name: release-pipeline
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags and history for versioning, changelog and bisect
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi qemu-system-arm
+
+      - name: Build
+        run: make clean fw
+
+      - name: Unit tests
+        run: make test-unit
+
+      - name: Smoke test (emulated Cortex-M3)
+        run: make test-qemu
+
+      - name: Manifest, changelog, gate
+        run: make manifest changelog gate
+
+      - name: Bisect on failure
+        if: failure() && github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: tools/bisect.sh ${{ github.event.before }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            build/*.bin
+            build/*.json
+            build/*.xml
+            build/CHANGELOG.md
